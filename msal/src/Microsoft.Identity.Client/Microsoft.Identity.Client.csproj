@@ -148,8 +148,11 @@
   
   <Import Project="$(MSBuildSDKExtrasTargets)" Condition="Exists('$(MSBuildSDKExtrasTargets)')" />
   
-  <ItemGroup>
+  <ItemGroup Condition=" '$(PackHack)' == 'true'">
     <ProjectReference Include="..\..\..\core\src\Microsoft.Identity.Core.csproj" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup Condition=" '$(PackHack)' == ''">
+    <ProjectReference Include="..\..\..\core\src\Microsoft.Identity.Core.csproj" />
   </ItemGroup>
   
   <!-- This is here to workaround designer issues so VS sees them appropriately -->
