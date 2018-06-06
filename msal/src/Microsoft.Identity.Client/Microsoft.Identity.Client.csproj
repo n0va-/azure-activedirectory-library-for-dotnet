@@ -149,7 +149,7 @@
   <Import Project="$(MSBuildSDKExtrasTargets)" Condition="Exists('$(MSBuildSDKExtrasTargets)')" />
   
   <ItemGroup>
-    <ProjectReference Include="..\..\..\core\src\Microsoft.Identity.Core.csproj" />
+    <ProjectReference Include="..\..\..\core\src\Microsoft.Identity.Core.csproj" PrivateAssets="All" />
   </ItemGroup>
   
   <!-- This is here to workaround designer issues so VS sees them appropriately -->
