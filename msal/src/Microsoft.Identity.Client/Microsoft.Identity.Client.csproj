@@ -165,15 +165,11 @@
 
   <!-- Hack until https://github.com/nuget/home/issues/3891 is fixed: exclude the Core project from  
   the dependencies when running msbuild /t:pack /p:NuGetPack=true -->
-  <!--<ItemGroup Condition=" '$(NuGetPack)' == 'true'">
+  <ItemGroup Condition=" '$(NuGetPack)' == 'true'">
     <ProjectReference Include="..\..\..\core\src\Microsoft.Identity.Core.csproj" PrivateAssets="All" />
   </ItemGroup>
   <ItemGroup Condition=" '$(NuGetPack)' == ''">
     <ProjectReference Include="..\..\..\core\src\Microsoft.Identity.Core.csproj" />
-  </ItemGroup>-->
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\core\src\Microsoft.Identity.Core.csproj" PrivateAssets="All" />
   </ItemGroup>
   
   <!-- This is here to workaround designer issues so VS sees them appropriately -->
