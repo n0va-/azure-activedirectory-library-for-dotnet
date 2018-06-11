@@ -28,24 +28,23 @@
 using CoreFoundation;
 using Foundation;
 using Microsoft.Identity.Core.Helpers;
+using Microsoft.Identity.Core.Platforms.iOS.EmbeddedWebview;
 using System;
 using System.Collections.Generic;
 using UIKit;
 using WebKit;
+using static Microsoft.Identity.Core.Platforms.iOS.EmbeddedWebview.WKWebNavigationDelegate;
 
 namespace Microsoft.Identity.Core.UI.EmbeddedWebview
 {
     [Foundation.Register("AuthenticationAgentUIViewController")]
     internal class AuthenticationAgentUIViewController : UIViewController
     {
-        private const string AboutBlankUri = "about:blank";
-
-        private WKWebView wkWebView;
-
         private readonly string url;
-        private readonly string callback;
+        public readonly string callback;
+        WKWebView wkWebView;
 
-        private readonly ReturnCodeCallback callbackMethod;
+        public readonly ReturnCodeCallback callbackMethod;
 
         public delegate void ReturnCodeCallback(AuthorizationResult result);
 
@@ -63,98 +62,59 @@ namespace Microsoft.Identity.Core.UI.EmbeddedWebview
 
             View.BackgroundColor = UIColor.White;
 
-            WKWebViewConfiguration webConfiguration = new WKWebViewConfiguration();
+            wkWebView = PrepareWKWebView();
 
-            wkWebView = new WKWebView(View.Bounds, webConfiguration);
-            NSUrl url = wkWebView.Url;
+            EvaluateJava();
 
-            wkWebView.LoadRequest(new NSUrlRequest(url));
+            this.View.AddSubview(wkWebView);
 
-            if (LoadView(url) == true)
-            {
-                wkWebView.StopLoading();
+            this.NavigationItem.LeftBarButtonItem = new UIBarButtonItem(UIBarButtonSystemItem.Cancel,
+                CancelAuthentication);
 
-                // If the title is too long, iOS automatically truncates it and adds ...
-                this.Title = wkWebView.EvaluateJavaScriptAsync(@"document.title").ToString();
-
-                View.AddSubview(wkWebView);
-
-                this.NavigationItem.LeftBarButtonItem = new UIBarButtonItem(UIBarButtonSystemItem.Cancel,
-                    this.CancelAuthentication);
-
-                wkWebView.LoadRequest(new NSUrlRequest(new NSUrl(this.url)));
-
-                // if this is false, page will be 'zoomed in' to normal size
-                //webView.ScalesPageToFit = true;
-            }
+            wkWebView.LoadRequest(new NSUrlRequest(new NSUrl(this.url)));
         }
 
-        private bool LoadView(NSUrl url)
+        protected WKWebView PrepareWKWebView()
         {
-            string requestUrlString = url.BaseUrl.ToString();
+            WKWebViewConfiguration wkconfg = new WKWebViewConfiguration() { };
 
-            // If the URL has the browser:// scheme then this is a request to open an external browser
-            if (requestUrlString.StartsWith(BrokerConstants.BrowserExtPrefix, StringComparison.OrdinalIgnoreCase))
+            wkWebView = new WKWebView(View.Bounds, wkconfg)
             {
-                DispatchQueue.MainQueue.DispatchAsync(() => CancelAuthentication(null, null));
+                UIDelegate = new WKWebViewUIDelegate(this),
+                NavigationDelegate = new WKWebNavigationDelegate(this)
+            };            
 
-                // Build the HTTPS URL for launching with an external browser
-                var httpsUrlBuilder = new UriBuilder(requestUrlString)
-                {
-                    Scheme = Uri.UriSchemeHttps
-                };
-                requestUrlString = httpsUrlBuilder.Uri.AbsoluteUri;
+            return wkWebView;
+        }  
+       
+        private void EvaluateJava()
+        {
+            WKJavascriptEvaluationResult handler = HandleWKJavascriptEvaluationResult;
 
-                DispatchQueue.MainQueue.DispatchAsync(
-                    () => UIApplication.SharedApplication.OpenUrl(new NSUrl(requestUrlString)));
-                this.DismissViewController(true, null);
-                return false;
-            }
+            // If the title is too long, iOS automatically truncates it and adds ...
+            this.Title = (NSString)@"Sign in";
+            //?? "Sign in";
 
-            if (requestUrlString.StartsWith(callback, StringComparison.OrdinalIgnoreCase) ||
-                requestUrlString.StartsWith(BrokerConstants.BrowserExtInstallPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                callbackMethod(new AuthorizationResult(AuthorizationStatus.Success, url.BaseUrl.ToString()));
-                this.DismissViewController(true, null);
-                return false;
-            }
+            wkWebView.EvaluateJavaScript(this.Title, handler);
 
-            if (requestUrlString.StartsWith(BrokerConstants.DeviceAuthChallengeRedirect, StringComparison.OrdinalIgnoreCase))
-            {
-                Uri uri = new Uri(requestUrlString);
-                string query = uri.Query;
-                if (query.StartsWith("?", StringComparison.OrdinalIgnoreCase))
-                {
-                    query = query.Substring(1);
-                }
-
-                Dictionary<string, string> keyPair = CoreHelpers.ParseKeyValueList(query, '&', true, false, null);
-                string responseHeader = DeviceAuthHelper.CreateDeviceAuthChallengeResponse(keyPair).Result;
-
-                NSMutableUrlRequest newRequest = (NSMutableUrlRequest)url.MutableCopy();
-                newRequest.Url = new NSUrl(keyPair["SubmitUrl"]);
-                newRequest[BrokerConstants.ChallengeResponseHeader] = responseHeader;
-                wkWebView.LoadRequest(newRequest);
-                return false;
-            }
-
-            if (!url.BaseUrl.AbsoluteString.Equals(AboutBlankUri, StringComparison.OrdinalIgnoreCase)
-             && !url.BaseUrl.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            {
-                AuthorizationResult result = new AuthorizationResult(AuthorizationStatus.ErrorHttp);
-                result.Error = MsalError.NonHttpsRedirectNotSupported;
-                result.ErrorDescription = MsalErrorMessage.NonHttpsRedirectNotSupported;
-                callbackMethod(result);
-                this.DismissViewController(true, null);
-                return false;
-            }
-
-            return true;
         }
 
-        private void CancelAuthentication(object sender, EventArgs e)
+        static void HandleWKJavascriptEvaluationResult(NSObject result, NSError err)
         {
-            callbackMethod(new AuthorizationResult(AuthorizationStatus.UserCancel, null));
+            if (err != null)
+            {
+                CoreLoggerBase.Default.Info(err.LocalizedDescription);
+            }
+            if (result != null)
+            {
+                CoreLoggerBase.Default.Info(result.ToString());
+            }
+            return;
+        }
+
+        public void CancelAuthentication(object sender, EventArgs e)
+        {
+            this.callbackMethod(new AuthorizationResult(AuthorizationStatus.UserCancel, null));
             this.DismissViewController(true, null);
         }
 
