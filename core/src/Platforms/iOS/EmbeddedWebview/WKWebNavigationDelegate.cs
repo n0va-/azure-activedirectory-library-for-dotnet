@@ -49,77 +49,87 @@ namespace Microsoft.Identity.Core.Platforms.iOS.EmbeddedWebview
             return;
         }
 
+        private static readonly Object lockObject = new object();
+
         public override void DecidePolicy(WKWebView webView, WKNavigationAction navigationAction, Action<WKNavigationActionPolicy> decisionHandler)
         {
-            string requestUrlString = navigationAction.Request.Url.ToString();
-
-            // If the URL has the browser:// scheme then this is a request to open an external browser
-            if (requestUrlString.StartsWith(BrokerConstants.BrowserExtPrefix, StringComparison.OrdinalIgnoreCase))
+            lock (lockObject)
             {
-                DispatchQueue.MainQueue.DispatchAsync(() => AuthenticationAgentUIViewController.CancelAuthentication(null, null));
 
-                // Build the HTTPS URL for launching with an external browser
-                var httpsUrlBuilder = new UriBuilder(requestUrlString)
+                string requestUrlString = navigationAction.Request.Url.ToString();
+                // If the URL has the browser:// scheme then this is a request to open an external browser
+                if (requestUrlString.StartsWith(BrokerConstants.BrowserExtPrefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    Scheme = Uri.UriSchemeHttps
-                };
-                requestUrlString = httpsUrlBuilder.Uri.AbsoluteUri;
+                    DispatchQueue.MainQueue.DispatchAsync(() => AuthenticationAgentUIViewController.CancelAuthentication(null, null));
 
-                DispatchQueue.MainQueue.DispatchAsync(
-                    () => UIApplication.SharedApplication.OpenUrl(new NSUrl(requestUrlString)));
-                AuthenticationAgentUIViewController.DismissViewController(true, null);
-                decisionHandler(WKNavigationActionPolicy.Allow);
-            }
+                    // Build the HTTPS URL for launching with an external browser
+                    var httpsUrlBuilder = new UriBuilder(requestUrlString)
+                    {
+                        Scheme = Uri.UriSchemeHttps
+                    };
+                    requestUrlString = httpsUrlBuilder.Uri.AbsoluteUri;
 
-            if (requestUrlString.StartsWith(AuthenticationAgentUIViewController.callback, StringComparison.OrdinalIgnoreCase) ||
-                   requestUrlString.StartsWith(BrokerConstants.BrowserExtInstallPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                AuthenticationAgentUIViewController.callbackMethod(new AuthorizationResult(AuthorizationStatus.Success, requestUrlString));
-                AuthenticationAgentUIViewController.DismissViewController(true, null);
-                decisionHandler(WKNavigationActionPolicy.Allow);
-            }
-
-            if (requestUrlString.StartsWith(BrokerConstants.DeviceAuthChallengeRedirect, StringComparison.OrdinalIgnoreCase))
-            {
-                Uri uri = new Uri(requestUrlString);
-                string query = uri.Query;
-                if (query.StartsWith("?", StringComparison.OrdinalIgnoreCase))
-                {
-                    query = query.Substring(1);
+                    DispatchQueue.MainQueue.DispatchAsync(
+                        () => UIApplication.SharedApplication.OpenUrl(new NSUrl(requestUrlString)));
+                    AuthenticationAgentUIViewController.DismissViewController(true, null);
+                    decisionHandler(WKNavigationActionPolicy.Cancel);
+                    return;
                 }
 
-                Dictionary<string, string> keyPair = CoreHelpers.ParseKeyValueList(query, '&', true, false, null);
-                string responseHeader = DeviceAuthHelper.CreateDeviceAuthChallengeResponse(keyPair).Result;
+                if (requestUrlString.StartsWith(AuthenticationAgentUIViewController.callback, StringComparison.OrdinalIgnoreCase) ||
+                       requestUrlString.StartsWith(BrokerConstants.BrowserExtInstallPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    AuthenticationAgentUIViewController.callbackMethod(new AuthorizationResult(AuthorizationStatus.Success, requestUrlString));
+                    AuthenticationAgentUIViewController.DismissViewController(true, null);
+                    decisionHandler(WKNavigationActionPolicy.Cancel);
+                    return;
+                }
 
-                NSMutableUrlRequest newRequest = (NSMutableUrlRequest)navigationAction.Request.MutableCopy();
-                newRequest.Url = new NSUrl(keyPair["SubmitUrl"]);
-                newRequest[BrokerConstants.ChallengeResponseHeader] = responseHeader;
-                webView.LoadRequest(newRequest);
-                decisionHandler(WKNavigationActionPolicy.Allow);
-            }
+                if (requestUrlString.StartsWith(BrokerConstants.DeviceAuthChallengeRedirect, StringComparison.OrdinalIgnoreCase))
+                {
+                    Uri uri = new Uri(requestUrlString);
+                    string query = uri.Query;
+                    if (query.StartsWith("?", StringComparison.OrdinalIgnoreCase))
+                    {
+                        query = query.Substring(1);
+                    }
 
-            if (!navigationAction.Request.Url.AbsoluteString.Equals(AboutBlankUri, StringComparison.OrdinalIgnoreCase)
-                && !navigationAction.Request.Url.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            {
-                AuthorizationResult result = new AuthorizationResult(AuthorizationStatus.ErrorHttp);
-                result.Error = MsalError.NonHttpsRedirectNotSupported;
-                result.ErrorDescription = MsalErrorMessage.NonHttpsRedirectNotSupported;
-                AuthenticationAgentUIViewController.callbackMethod(result);
-                AuthenticationAgentUIViewController.DismissViewController(true, null);
+                    Dictionary<string, string> keyPair = CoreHelpers.ParseKeyValueList(query, '&', true, false, null);
+                    string responseHeader = DeviceAuthHelper.CreateDeviceAuthChallengeResponse(keyPair).Result;
+
+                    NSMutableUrlRequest newRequest = (NSMutableUrlRequest)navigationAction.Request.MutableCopy();
+                    newRequest.Url = new NSUrl(keyPair["SubmitUrl"]);
+                    newRequest[BrokerConstants.ChallengeResponseHeader] = responseHeader;
+                    webView.LoadRequest(newRequest);
+                    decisionHandler(WKNavigationActionPolicy.Cancel);
+                    return;
+                }
+
+                if (!navigationAction.Request.Url.AbsoluteString.Equals(AboutBlankUri, StringComparison.OrdinalIgnoreCase)
+                    && !navigationAction.Request.Url.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                {
+                    AuthorizationResult result = new AuthorizationResult(AuthorizationStatus.ErrorHttp);
+                    result.Error = MsalError.NonHttpsRedirectNotSupported;
+                    result.ErrorDescription = MsalErrorMessage.NonHttpsRedirectNotSupported;
+                    AuthenticationAgentUIViewController.callbackMethod(result);
+                    AuthenticationAgentUIViewController.DismissViewController(true, null);
+                    decisionHandler(WKNavigationActionPolicy.Cancel);
+                    return;
+                }
                 decisionHandler(WKNavigationActionPolicy.Allow);
+                return;
             }
-            decisionHandler(WKNavigationActionPolicy.Allow);
         }
-    }
 
-    internal class WKWebViewUIDelegate : WKUIDelegate
-    {
-        AuthenticationAgentUIViewController controller = null;
-
-        public WKWebViewUIDelegate(AuthenticationAgentUIViewController c)
+        internal class WKWebViewUIDelegate : WKUIDelegate
         {
-            controller = c;
-            return;
+            AuthenticationAgentUIViewController controller = null;
+
+            public WKWebViewUIDelegate(AuthenticationAgentUIViewController c)
+            {
+                controller = c;
+                return;
+            }
         }
     }
 }
